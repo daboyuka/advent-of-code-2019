@@ -1,0 +1,26 @@
+package aoc2019
+
+import (
+	"os"
+
+	. "aoc2019/helpers"
+)
+
+func A(lines []string) {
+
+}
+
+func B(lines []string) {
+
+}
+
+func main() {
+    switch arg := os.Args[1];arg {
+    case "a":
+    	A(Readlines(os.Stdin))
+    case"b":
+		B(Readlines(os.Stdin))
+    default:
+    panic(arg)
+    }
+}
