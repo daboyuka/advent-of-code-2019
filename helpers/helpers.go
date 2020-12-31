@@ -96,3 +96,16 @@ func Abs(x int) int {
 	}
 	return x
 }
+
+func GCD(a, b int) int {
+	a, b = Abs(a), Abs(b)
+	if a < b {
+		a, b = b, a
+	}
+
+	if b == 0 {
+		return a
+	} else {
+		return GCD(b, a%b)
+	}
+}
