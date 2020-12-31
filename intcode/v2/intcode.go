@@ -48,10 +48,27 @@ func (prog Prog) Copy() Prog {
 	return prog2
 }
 
+func (prog Prog) Load(v int, mode Mode) int {
+	switch mode {
+	case 0:
+		return prog[v]
+	case 1:
+		return v
+	default:
+		panic(fmt.Errorf("bad mode %d", mode))
+	}
+}
+
 type (
 	Instruction int
 	Opcode      int
 	Mode        int
+	ParamKind   int
+)
+
+const (
+	Load = ParamKind(iota)
+	Store
 )
 
 func (in Instruction) Opcode() Opcode { return Opcode(in % 100) }
@@ -64,64 +81,90 @@ func (in Instruction) Modes(nParams int) (modes []Mode) {
 	return modes
 }
 
-func (prog Prog) Load(v int, mode Mode) int {
-	switch mode {
-	case 0:
-		return prog[v]
-	case 1:
-		return v
-	default:
-		panic(fmt.Errorf("bad mode %d", mode))
+func (in Instruction) LoadParamVals(prog Prog, pc int, pkinds []ParamKind) (vals []int) {
+	modes := in.Modes(len(pkinds))
+
+	for i, pkind := range pkinds {
+		raw := prog[pc+i+1]
+
+		var v int
+		switch pkind {
+		case Load:
+			v = prog.Load(raw, modes[i])
+		case Store:
+			v = raw
+		default:
+			panic(pkind)
+		}
+
+		vals = append(vals, v)
 	}
+	return vals
 }
 
 type ProgCtx struct {
 	IO
 }
 
+func (op Opcode) Params() []ParamKind {
+	switch op {
+	case 1, 2:
+		return []ParamKind{Load, Load, Store}
+	case 3:
+		return []ParamKind{Store}
+	case 4:
+		return []ParamKind{Load}
+	case 5, 6:
+		return []ParamKind{Load, Load}
+	case 7, 8:
+		return []ParamKind{Load, Load, Store}
+	case 99:
+		return nil
+	default:
+		panic(op)
+	}
+}
+
 func (in Instruction) Exec(prog Prog, pc int, ctx *ProgCtx) (newPC int, cont bool) {
 	switch op := in.Opcode(); op {
-	case 1:
-		modes := in.Modes(3)
-		p1, p2, p3 := prog[pc+1], prog[pc+2], prog[pc+3]
-		prog[p3] = prog.Load(p1, modes[0]) + prog.Load(p2, modes[1])
-		return pc + 4, true
-	case 2:
-		modes := in.Modes(3)
-		p1, p2, p3 := prog[pc+1], prog[pc+2], prog[pc+3]
-		prog[p3] = prog.Load(p1, modes[0]) * prog.Load(p2, modes[1])
+	case 1, 2:
+		vals := in.LoadParamVals(prog, pc, []ParamKind{Load, Load, Store})
+		if op == 1 {
+			prog[vals[2]] = vals[0] + vals[1]
+		} else {
+			prog[vals[2]] = vals[0] * vals[1]
+		}
 		return pc + 4, true
 	case 3:
-		p := prog[pc+1]
-		prog[p] = ctx.Input()
+		vals := in.LoadParamVals(prog, pc, []ParamKind{Store})
+		prog[vals[0]] = ctx.Input()
 		return pc + 2, true
 	case 4:
-		modes := in.Modes(1)
-		p := prog[pc+1]
-		ctx.Output(prog.Load(p, modes[0]))
+		vals := in.LoadParamVals(prog, pc, []ParamKind{Load})
+		ctx.Output(vals[0])
 		return pc + 2, true
 	case 5, 6:
-		modes := in.Modes(2)
-		p1, p2 := prog[pc+1], prog[pc+2]
-		v1, v2 := prog.Load(p1, modes[0]), prog.Load(p2, modes[1])
-		if (v1 != 0) == (op == 5) {
-			return v2, true
+		vals := in.LoadParamVals(prog, pc, []ParamKind{Load, Load})
+		if (vals[0] != 0) == (op == 5) {
+			return vals[1], true
 		} else {
 			return pc + 3, true
 		}
 	case 7, 8:
-		modes := in.Modes(3)
-		p1, p2, p3 := prog[pc+1], prog[pc+2], prog[pc+3]
-		v1, v2 := prog.Load(p1, modes[0]), prog.Load(p2, modes[1])
+		vals := in.LoadParamVals(prog, pc, []ParamKind{Load, Load, Store})
 
-		outV := 0
-		if op == 7 && v1 < v2 {
-			outV = 1
-		} else if op == 8 && v1 == v2 {
-			outV = 1
+		cmp := false
+		if op == 7 {
+			cmp = vals[0] < vals[1]
+		} else {
+			cmp = vals[0] == vals[1]
 		}
 
-		prog[p3] = outV
+		if cmp {
+			prog[vals[2]] = 1
+		} else {
+			prog[vals[2]] = 0
+		}
 		return pc + 4, true
 	case 99:
 		return 0, false
