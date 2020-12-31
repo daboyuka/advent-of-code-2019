@@ -51,3 +51,17 @@ func (c *ChanIO) Done() {
 		close(c.IsDone)
 	}
 }
+
+type FunIO struct {
+	Inputs  func() int
+	Outputs func(int)
+	OnDone  func()
+}
+
+func (f FunIO) Input() int   { return f.Inputs() }
+func (f FunIO) Output(v int) { f.Outputs(v) }
+func (f FunIO) Done() {
+	if f.OnDone != nil {
+		f.OnDone()
+	}
+}
