@@ -2,15 +2,21 @@ package helpers
 
 import (
 	"bufio"
+	"bytes"
 	"io"
 )
 
 func Readlines(r io.Reader) (lines []string) {
 	rbuf := bufio.NewReader(r)
+	linebuf := bytes.Buffer{}
 	for {
-		switch line, _, err := rbuf.ReadLine(); err {
+		switch line, isPrefix, err := rbuf.ReadLine(); err {
 		case nil:
-			lines = append(lines, string(line))
+			linebuf.Write(line)
+			if !isPrefix {
+				lines = append(lines, linebuf.String())
+				linebuf.Reset()
+			}
 		case io.EOF:
 			return
 		default:
