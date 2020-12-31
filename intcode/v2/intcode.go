@@ -48,12 +48,14 @@ func (prog Prog) Copy() Prog {
 	return prog2
 }
 
-func (prog Prog) Load(v int, mode Mode) int {
+func (prog Prog) Load(ctx *ProgCtx, v int, mode Mode) int {
 	switch mode {
-	case 0:
+	case Position:
 		return prog[v]
-	case 1:
+	case Value:
 		return v
+	case Relative:
+		return prog[ctx.RB+v]
 	default:
 		panic(fmt.Errorf("bad mode %d", mode))
 	}
@@ -64,6 +66,12 @@ type (
 	Opcode      int
 	Mode        int
 	ParamKind   int
+)
+
+const (
+	Position = Mode(0)
+	Value    = Mode(1)
+	Relative = Mode(2)
 )
 
 const (
@@ -81,18 +89,21 @@ func (in Instruction) Modes(nParams int) (modes []Mode) {
 	return modes
 }
 
-func (in Instruction) LoadParamVals(prog Prog, pc int, pkinds []ParamKind) (vals []int) {
+func (in Instruction) LoadParamVals(prog Prog, ctx *ProgCtx, pkinds []ParamKind) (vals []int) {
 	modes := in.Modes(len(pkinds))
 
 	for i, pkind := range pkinds {
-		raw := prog[pc+i+1]
+		raw := prog[ctx.PC+i+1]
 
 		var v int
 		switch pkind {
 		case Load:
-			v = prog.Load(raw, modes[i])
+			v = prog.Load(ctx, raw, modes[i])
 		case Store:
 			v = raw
+			if modes[i] == Relative {
+				v += ctx.RB
+			}
 		default:
 			panic(pkind)
 		}
@@ -104,6 +115,9 @@ func (in Instruction) LoadParamVals(prog Prog, pc int, pkinds []ParamKind) (vals
 
 type ProgCtx struct {
 	IO
+
+	PC int
+	RB int
 }
 
 func (op Opcode) Params() []ParamKind {
@@ -125,33 +139,33 @@ func (op Opcode) Params() []ParamKind {
 	}
 }
 
-func (in Instruction) Exec(prog Prog, pc int, ctx *ProgCtx) (newPC int, cont bool) {
+func (in Instruction) Exec(prog Prog, ctx *ProgCtx) (cont bool) {
 	switch op := in.Opcode(); op {
 	case 1, 2:
-		vals := in.LoadParamVals(prog, pc, []ParamKind{Load, Load, Store})
+		vals := in.LoadParamVals(prog, ctx, []ParamKind{Load, Load, Store})
 		if op == 1 {
 			prog[vals[2]] = vals[0] + vals[1]
 		} else {
 			prog[vals[2]] = vals[0] * vals[1]
 		}
-		return pc + 4, true
+		ctx.PC += 4
 	case 3:
-		vals := in.LoadParamVals(prog, pc, []ParamKind{Store})
+		vals := in.LoadParamVals(prog, ctx, []ParamKind{Store})
 		prog[vals[0]] = ctx.Input()
-		return pc + 2, true
+		ctx.PC += 2
 	case 4:
-		vals := in.LoadParamVals(prog, pc, []ParamKind{Load})
+		vals := in.LoadParamVals(prog, ctx, []ParamKind{Load})
 		ctx.Output(vals[0])
-		return pc + 2, true
+		ctx.PC += 2
 	case 5, 6:
-		vals := in.LoadParamVals(prog, pc, []ParamKind{Load, Load})
+		vals := in.LoadParamVals(prog, ctx, []ParamKind{Load, Load})
 		if (vals[0] != 0) == (op == 5) {
-			return vals[1], true
+			ctx.PC = vals[1]
 		} else {
-			return pc + 3, true
+			ctx.PC += 3
 		}
 	case 7, 8:
-		vals := in.LoadParamVals(prog, pc, []ParamKind{Load, Load, Store})
+		vals := in.LoadParamVals(prog, ctx, []ParamKind{Load, Load, Store})
 
 		cmp := false
 		if op == 7 {
@@ -165,28 +179,27 @@ func (in Instruction) Exec(prog Prog, pc int, ctx *ProgCtx) (newPC int, cont boo
 		} else {
 			prog[vals[2]] = 0
 		}
-		return pc + 4, true
+		ctx.PC += 4
+	case 9:
+		vals := in.LoadParamVals(prog, ctx, []ParamKind{Load})
+		ctx.RB += vals[0]
+		ctx.PC += 2
 	case 99:
-		return 0, false
+		return false
 	default:
 		panic(in)
 	}
 
-	//Opcode 5 is jump-if-true: if the first parameter is non-zero, it sets the instruction pointer to the value from the second parameter. Otherwise, it does nothing.
-	//Opcode 6 is jump-if-false: if the first parameter is zero, it sets the instruction pointer to the value from the second parameter. Otherwise, it does nothing.
-	//Opcode 7 is less than: if the first parameter is less than the second parameter, it stores 1 in the position given by the third parameter. Otherwise, it stores 0.
-	//Opcode 8 is equals: if the first parameter is equal to the second parameter, it stores 1 in the position given by the third parameter. Otherwise, it stores 0.
+	return true
 }
 
 func (prog Prog) Run(ctx *ProgCtx) {
-	pc := 0
+	ctx.PC = 0
 	for {
-		op := Instruction(prog[pc])
-		newPC, cont := op.Exec(prog, pc, ctx)
-		if !cont {
+		op := Instruction(prog[ctx.PC])
+		if cont := op.Exec(prog, ctx); !cont {
 			ctx.IO.Done()
 			return
 		}
-		pc = newPC
 	}
 }
