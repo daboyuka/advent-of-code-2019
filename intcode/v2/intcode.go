@@ -184,6 +184,7 @@ func (prog Prog) Run(ctx *ProgCtx) {
 		op := Instruction(prog[pc])
 		newPC, cont := op.Exec(prog, pc, ctx)
 		if !cont {
+			ctx.IO.Done()
 			return
 		}
 		pc = newPC
